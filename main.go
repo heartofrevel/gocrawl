@@ -53,6 +53,8 @@ func urlInURLList(url string, urlList *[]string) bool {
 }
 
 func crawler(c echo.Context, urlRec string, feed chan string, urlList *[]string, wg *sync.WaitGroup, client http.Client) {
+	ctx := c.Request().Context()
+
 	defer wg.Done()
 	URL, _ := url.Parse(urlRec)
 	response, err := client.Get(urlRec)
@@ -67,36 +69,41 @@ func crawler(c echo.Context, urlRec string, feed chan string, urlList *[]string,
 	tokenizer := html.NewTokenizer(body)
 	flag := true
 	for flag {
-		tokenType := tokenizer.Next()
-		switch {
-		case tokenType == html.ErrorToken:
-			flag = false
-			break
-		case tokenType == html.StartTagToken:
-			token := tokenizer.Token()
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			tokenType := tokenizer.Next()
+			switch {
+			case tokenType == html.ErrorToken:
+				flag = false
+				break
+			case tokenType == html.StartTagToken:
+				token := tokenizer.Token()
 
-			// Check if the token is an <a> tag
-			isAnchor := token.Data == "a"
-			if !isAnchor {
-				continue
-			}
+				// Check if the token is an <a> tag
+				isAnchor := token.Data == "a"
+				if !isAnchor {
+					continue
+				}
 
-			ok, urlHref := getReference(token)
-			if !ok {
-				continue
-			}
+				ok, urlHref := getReference(token)
+				if !ok {
+					continue
+				}
 
-			// Make sure the url begines in http**
-			hasProto := strings.Index(urlHref, "http") == 0
-			if hasProto {
-				if !urlInURLList(urlHref, urlList) {
-					if strings.Contains(urlHref, URL.Host) {
-						*urlList = append(*urlList, urlHref)
-						// fmt.Println(urlHref)
-						// c.String(http.StatusOK, urlHref+"\n")Documents
-						if !checkExt(filepath.Ext(urlHref)) {
-							wg.Add(1)
-							go crawler(c, urlHref, feed, urlList, wg, client)
+				// Make sure the url begines in http**
+				hasProto := strings.Index(urlHref, "http") == 0
+				if hasProto {
+					if !urlInURLList(urlHref, urlList) {
+						if strings.Contains(urlHref, URL.Host) {
+							*urlList = append(*urlList, urlHref)
+							// fmt.Println(urlHref)
+							// c.String(http.StatusOK, urlHref+"\n")Documents
+							if !checkExt(filepath.Ext(urlHref)) {
+								wg.Add(1)
+								go crawler(c, urlHref, feed, urlList, wg, client)
+							}
 						}
 					}
 				}
