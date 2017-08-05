@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/labstack/echo"
+	"github.com/labstack/echo/middleware"
 	"golang.org/x/net/html"
 )
 
@@ -50,10 +52,10 @@ func urlInURLList(url string, urlList *[]string) bool {
 	return false
 }
 
-func crawler(c echo.Context, urlRec string, feed chan string, urlList *[]string, wg *sync.WaitGroup) {
+func crawler(c echo.Context, urlRec string, feed chan string, urlList *[]string, wg *sync.WaitGroup, client http.Client) {
 	defer wg.Done()
 	URL, _ := url.Parse(urlRec)
-	response, err := http.Get(urlRec)
+	response, err := client.Get(urlRec)
 	if err != nil {
 		log.Print(err)
 		return
@@ -90,11 +92,11 @@ func crawler(c echo.Context, urlRec string, feed chan string, urlList *[]string,
 				if !urlInURLList(urlHref, urlList) {
 					if strings.Contains(urlHref, URL.Host) {
 						*urlList = append(*urlList, urlHref)
-						fmt.Println(urlHref)
+						// fmt.Println(urlHref)
 						// c.String(http.StatusOK, urlHref+"\n")Documents
 						if !checkExt(filepath.Ext(urlHref)) {
 							wg.Add(1)
-							go crawler(c, urlHref, feed, urlList, wg)
+							go crawler(c, urlHref, feed, urlList, wg, client)
 						}
 					}
 				}
@@ -107,10 +109,14 @@ func scrapePOST(c echo.Context) error {
 	var urlList []string
 	urlSession := urlFound{}
 	var wg sync.WaitGroup
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{Transport: tr}
 	urlParam := c.FormValue("url")
 	feed := make(chan string, 1000)
 	wg.Add(1)
-	go crawler(c, urlParam, feed, &urlList, &wg)
+	go crawler(c, urlParam, feed, &urlList, &wg, *client)
 	wg.Wait()
 	var count = 0
 	for _, url := range urlList {
@@ -133,10 +139,14 @@ func scrapeGET(c echo.Context) error {
 	var urlList []string
 	urlSession := &urlFound{}
 	var wg sync.WaitGroup
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{Transport: tr}
 	urlParam := c.QueryParam("url")
 	feed := make(chan string, 1000)
 	wg.Add(1)
-	go crawler(c, urlParam, feed, &urlList, &wg)
+	go crawler(c, urlParam, feed, &urlList, &wg, *client)
 	wg.Wait()
 	var count = 0
 	for _, url := range urlList {
@@ -159,5 +169,8 @@ func main() {
 	e := echo.New()
 	e.POST("/scraper", scrapePOST)
 	e.GET("/scraper", scrapeGET)
+	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
+		Format: `[${time_rfc3339}] ${status} ${method} ${host}${path}` + "\n",
+	}))
 	e.Start(":8001")
 }
